@@ -46,6 +46,6 @@ let install_rules ~sctx ~dir ({ name; site = loc, (pkg, site); _ } as t) =
         ~dst:(sprintf "%s/%s" (Package.Name.to_string name) Findlib.meta_fn)
         (Site { pkg; site; loc })
         (Super_context.get_site_of_packages sctx)
-        meta
+        ~kind:`File meta
     in
     [ Install.Entry.Sourced.create ~loc entry ]
