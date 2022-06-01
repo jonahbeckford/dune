@@ -594,6 +594,17 @@ let make sctx ~dir ~expander ~lint ~preprocess ~preprocessor_deps
   let preprocessor_deps, sandbox =
     Dep_conf_eval.unnamed preprocessor_deps ~expander
   in
+  let sandbox =
+    match
+      Sandbox_config.equal Sandbox_config.no_special_requirements sandbox
+    with
+    | false -> sandbox
+    | true ->
+      let project = Scope.project scope in
+      let dune_version = Dune_project.dune_version project in
+      if dune_version >= (3, 3) then Sandbox_config.needs_sandboxing
+      else sandbox
+  in
   let preprocessor_deps =
     Action_builder.memoize "preprocessor deps" preprocessor_deps
   in
