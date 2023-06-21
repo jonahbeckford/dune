@@ -58,6 +58,7 @@ end
 let locked = ref false
 
 let lock_exn ~timeout =
+  let timeout = match timeout with None -> Some 10.0 | Some v -> Some v in
   match Config.(get global_lock) with
   | `Disabled -> ()
   | `Enabled -> (
