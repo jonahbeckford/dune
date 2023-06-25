@@ -1,7 +1,7 @@
-3.8.2 (2023-06-16)
-------------------
+3.8.2-revert-PR7906 (2023-06-16)
+--------------------------------
 
-- Switch back to threaded console for all systems; fix unresponsive console on
+- *Reverted* Switch back to threaded console for all systems; fix unresponsive console on
   Windows (#7906, @nojb)
 
 - Respect `-p` / `--only-packages` for `melange.emit` artifacts (#7849, @anmonteiro)
