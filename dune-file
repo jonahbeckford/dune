@@ -1,4 +1,4 @@
-(dirs _boot :standard \ result)
+(dirs _boot :standard \ result msys64 .ci)
 
 (data_only_dirs _boot)
 

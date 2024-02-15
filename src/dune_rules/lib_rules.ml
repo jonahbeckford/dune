@@ -1,13 +1,14 @@
 open Import
 open Memo.O
 
+let msvc_hack_lib ~prefix ~ext lib =
+  match String.drop_prefix lib ~prefix:"-l" with
+  | None -> lib
+  | Some l -> prefix ^ l ^ ext
+
 let msvc_hack_cclibs =
   List.map ~f:(fun lib ->
-    let lib =
-      match String.drop_prefix lib ~prefix:"-l" with
-      | None -> lib
-      | Some l -> l ^ ".lib"
-    in
+    let lib = msvc_hack_lib ~prefix:"" ~ext:".lib" lib in
     Option.value ~default:lib (String.drop_prefix ~prefix:"-l" lib))
 ;;
 
@@ -27,15 +28,50 @@ let build_lib
   Ocaml_toolchain.compiler ocaml mode
   |> Memo.Result.iter ~f:(fun compiler ->
     let target = Library.archive lib ~dir ~ext:(Mode.compiled_lib_ext mode) in
+    let* ocaml = Context.ocaml ctx in
     let stubs_flags =
+      let msvcize ~prefix ~ext =
+        (* https://github.com/ocaml/dune/issues/119 *)
+        match ocaml.lib_config.ccomp_type with
+        | Msvc -> msvc_hack_lib ~prefix ~ext
+        | Other _ -> Fun.id
+      in
       let lib_archive = Library.stubs_archive lib in
       let foreign_archives = Library.foreign_archives lib in
+      let initial_args =
+        (* Supply the library search location (-L) for MSVC. We trivially
+           know the final location for [lib_archive] in a conventional
+           opam or findlib directory structure based on [ocamlc -config].
+           And we can add variants to the library search location if needed.
+           However, where the [foreign_archives] are located in not possible
+           from this [build_lib] function. Luckily encoding [-L] for
+           [foreign_archives] is unnecessary since each foreign archive is
+           a transitive dependency ... the ocamlopt/ocamlc linker will have
+           already emitted each of the transitive dependencies' [-L] options
+           (captured inside their .cma/cmxa) by the time we get to this
+           particular library. *)
+        match ocaml.lib_config.ccomp_type, Path.parent ocaml.lib_config.stdlib_dir with
+        | Msvc, Some libdir ->
+          (* Conventional Location: <findlibhome>/lib/<libname>
+             given <findlibhome>/lib/ocaml. *)
+          let libsubdir = Lib_name.to_string (Library.best_name lib)
+            (* Common variant: <libname>=lwt.unix ==> lib/lwt/unix  *)
+            |> String.map ~f:(function '.' -> '/' | c -> c)
+          in
+          [ "-cclib"
+          ; "-L"
+            ^ Path.to_string libdir
+            ^ "/"
+            ^ libsubdir
+          ]
+     | Msvc, None | Other _, _ -> []
+      in
       let make_args ~stub_mode archive =
-        let lname =
-          "-l" ^ Foreign.Archive.(name ~mode:stub_mode archive |> Name.to_string)
+        let stubname = Foreign.Archive.(name ~mode:stub_mode archive |> Name.to_string) in
+        let lname = "-l" ^ stubname in
+        let cclib = [ "-cclib"; msvcize ~prefix:"lib" ~ext:".lib" lname ]
         in
-        let cclib = [ "-cclib"; lname ] in
-        let dllib = [ "-dllib"; lname ] in
+        let dllib = [ "-dllib"; msvcize ~prefix:"dll" ~ext:".dll" lname ] in
         match mode with
         | Native -> cclib
         | Byte -> dllib @ cclib
@@ -49,10 +85,9 @@ let build_lib
         List.concat_map foreign_archives ~f:(make_args ~stub_mode:Mode.Select.All)
       in
       match lib_archive with
-      | Some lib_archive -> make_args ~stub_mode lib_archive @ foreign_archives
+      | Some lib_archive -> initial_args @ make_args ~stub_mode lib_archive @ foreign_archives
       | None -> foreign_archives
     in
-    let* ocaml = Context.ocaml ctx in
     let map_cclibs =
       (* https://github.com/ocaml/dune/issues/119 *)
       match ocaml.lib_config.ccomp_type with
