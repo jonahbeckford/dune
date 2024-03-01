@@ -75,26 +75,55 @@ end = struct
 
   module Merlin = Dune_rules.Merlin
 
-  let load_merlin_file file =
-    (* We search for an appropriate merlin configuration in the current
-       directory and its parents *)
-    let rec find_closest path =
-      match
-        get_merlin_files_paths path
-        |> List.find_map ~f:(fun file_path ->
-          (* FIXME we are racing against the build system writing these
-             files here *)
-          match Merlin.Processed.load_file file_path with
-          | Error msg -> Some (Merlin_conf.make_error msg)
-          | Ok config -> Merlin.Processed.get config ~file)
-      with
-      | Some p -> Some p
-      | None ->
-        (match Path.Build.parent path with
-         | None -> None
-         | Some dir -> find_closest dir)
+  let invert_merlin_source_dirs ~inverse csexp =
+    let rec walk : Csexp.t -> Csexp.t = function
+      | Atom a -> Atom a
+      | List [ Atom "S"; Atom v ] -> List [ Atom "S"; Atom (inverse v) ]
+      | List l -> List (List.map ~f:walk l)
     in
-    match find_closest (Path.Build.parent_exn file) with
+    walk csexp
+  ;;
+
+  let load_merlin_file file =
+    (* We search the project source prefix map, or just use [file] if not there *)
+    let outer_files =
+      match Dune_util.Build_path_prefix_map.project_target_buildfile file with
+      | None, inverse -> [ file, inverse ]
+      | Some targetfile, inverse ->
+        (* Search both the target and the original *)
+        [ targetfile, inverse; file, Fun.id ]
+    in
+    let inner_search (file, inverse) =
+      (* We search for an appropriate merlin configuration in the current
+         directory and its parents *)
+      let rec find_closest path =
+        match
+          get_merlin_files_paths path
+          |> List.find_map ~f:(fun file_path ->
+               (* FIXME we are racing against the build system writing these
+              files here *)
+               match Merlin.Processed.load_file file_path with
+               | Error msg -> Some (Merlin_conf.make_error msg)
+               | Ok config -> Merlin.Processed.get config ~file)
+        with
+        | Some p -> Some (invert_merlin_source_dirs ~inverse p)
+        | None ->
+          (match Path.Build.parent path with
+           | None -> None
+           | Some dir -> find_closest dir)
+      in
+      find_closest (Path.Build.parent_exn file)
+    in
+    let outer_search =
+      List.fold_left
+        ~f:(fun acc outer_file ->
+          match acc with
+          | Some x -> Some x
+          | None -> inner_search outer_file)
+        ~init:None
+        outer_files
+    in
+    match outer_search with
     | Some x -> x
     | None ->
       Path.Build.drop_build_context_exn file
@@ -144,8 +173,8 @@ end = struct
   let print_merlin_conf file =
     to_local file
     >>| (function
-           | Error s -> Merlin_conf.make_error s
-           | Ok file -> load_merlin_file file)
+          | Error s -> Merlin_conf.make_error s
+          | Ok file -> load_merlin_file file)
     >>| Merlin_conf.to_stdout
   ;;
 
