@@ -32,6 +32,7 @@ type t =
   ; map_workspace_root : bool
   ; executables_implicit_empty_intf : bool
   ; accept_alternative_dune_file_name : bool
+  ; reject_conventional_dune_file_name : bool
   ; generate_opam_files : bool
   ; warnings : Warning.Settings.t
   ; use_standard_c_and_cxx_flags : bool option
@@ -93,6 +94,7 @@ let to_dyn
   ; map_workspace_root
   ; executables_implicit_empty_intf
   ; accept_alternative_dune_file_name
+  ; reject_conventional_dune_file_name
   ; generate_opam_files
   ; warnings
   ; use_standard_c_and_cxx_flags
@@ -126,6 +128,7 @@ let to_dyn
     ; "map_workspace_root", bool map_workspace_root
     ; "executables_implicit_empty_intf", bool executables_implicit_empty_intf
     ; "accept_alternative_dune_file_name", bool accept_alternative_dune_file_name
+    ; "reject_conventional_dune_file_name", bool reject_conventional_dune_file_name
     ; "generate_opam_files", bool generate_opam_files
     ; "warnings", Warning.Settings.to_dyn warnings
     ; "use_standard_c_and_cxx_flags", option bool use_standard_c_and_cxx_flags
@@ -349,7 +352,9 @@ let interpret_lang_and_extensions ~(lang : Lang.Instance.t) ~explicit_extensions
   parsing_context, stanza_parser, extension_args
 ;;
 
-let filename = "dune-project"
+let filename = match Sys.getenv_opt "DUNE_PROJECT_FILENAME" with
+  | Some s when s <> "" -> s
+  | _ -> "dune-project"
 let opam_file_location_default ~lang:_ = `Relative_to_project
 let implicit_transitive_deps_default ~lang:_ = true
 let wrapped_executables_default ~(lang : Lang.Instance.t) = lang.version >= (2, 0)
@@ -365,6 +370,9 @@ let explicit_js_mode_default ~(lang : Lang.Instance.t) = lang.version >= (2, 0)
 let accept_alternative_dune_file_name_default ~(lang : Lang.Instance.t) =
   lang.version >= (3, 0)
 ;;
+
+let reject_conventional_dune_file_name_default ~(lang : Lang.Instance.t) =
+  lang.version >= (3, 15)
 
 let cram_default ~(lang : Lang.Instance.t) = lang.version >= (3, 0)
 let expand_aliases_in_sandbox_default ~lang:_ = false
@@ -438,6 +446,7 @@ let infer ~dir info packages =
   ; map_workspace_root
   ; executables_implicit_empty_intf
   ; accept_alternative_dune_file_name = false
+  ; reject_conventional_dune_file_name = false
   ; stanza_parser
   ; project_file = None
   ; extension_args
@@ -473,6 +482,7 @@ let encode : t -> Dune_lang.t list =
       ; map_workspace_root
       ; executables_implicit_empty_intf
       ; accept_alternative_dune_file_name
+      ; reject_conventional_dune_file_name
       ; generate_opam_files
       ; warnings = _
       ; use_standard_c_and_cxx_flags
@@ -529,6 +539,10 @@ let encode : t -> Dune_lang.t list =
           "accept_alternative_dune_file_name"
           accept_alternative_dune_file_name
           accept_alternative_dune_file_name_default
+      ; flag'
+          "reject_conventional_dune_file_name"
+          reject_conventional_dune_file_name
+          reject_conventional_dune_file_name_default
       ; flag' "explicit_js_mode" explicit_js_mode explicit_js_mode_default
         (* Two other ways of dealing with flags *)
       ; (match use_standard_c_and_cxx_flags with
@@ -762,6 +776,10 @@ let parse ~dir ~(lang : Lang.Instance.t) ~file =
        field_b
          "accept_alternative_dune_file_name"
          ~check:(Dune_lang.Syntax.since Stanza.syntax (3, 0))
+     and+ reject_conventional_dune_file_name =
+       field_b
+         "reject_conventional_dune_file_name"
+         ~check:(Dune_lang.Syntax.since Stanza.syntax (3, 15))
      and+ () = Dune_lang.Versioned_file.no_more_lang
      and+ generate_opam_files =
        field_o_b
@@ -895,6 +913,7 @@ let parse ~dir ~(lang : Lang.Instance.t) ~file =
        ; map_workspace_root
        ; executables_implicit_empty_intf
        ; accept_alternative_dune_file_name
+       ; reject_conventional_dune_file_name
        ; generate_opam_files
        ; warnings
        ; use_standard_c_and_cxx_flags
@@ -913,7 +932,10 @@ let parse ~dir ~(lang : Lang.Instance.t) ~file =
 ;;
 
 let load_dune_project ~read ~dir opam_packages : t Memo.t =
-  let file = Path.Source.relative dir filename in
+  let file = match Sys.getenv_opt "DUNE_PROJECT_FILENAME" with
+    | Some s when s <> "" -> Path.Source.relative dir s
+    | _ -> Path.Source.relative dir filename
+  in
   let open Memo.O in
   let* lexbuf =
     let+ contents = read file in
@@ -963,6 +985,7 @@ let wrapped_executables t = t.wrapped_executables
 let map_workspace_root t = t.map_workspace_root
 let executables_implicit_empty_intf t = t.executables_implicit_empty_intf
 let accept_alternative_dune_file_name t = t.accept_alternative_dune_file_name
+let reject_conventional_dune_file_name t = t.reject_conventional_dune_file_name
 let () = Extension.register_simple Dune_lang.Action.Action_plugin.syntax (return [])
 let dune_site_extension = Extension.register_unit Site.dune_site_syntax (return [])
 let strict_package_deps t = t.strict_package_deps

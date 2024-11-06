@@ -543,7 +543,8 @@ let load ~dir (status : Source_dir_status.t) project ~files ~parent =
     else if Dune_project.accept_alternative_dune_file_name project
             && Filename.Set.mem files alternative_fname
     then Some alternative_fname
-    else if Filename.Set.mem files fname
+    else if not (Dune_project.reject_conventional_dune_file_name project)
+            && Filename.Set.mem files fname
     then Some fname
     else None
   in
